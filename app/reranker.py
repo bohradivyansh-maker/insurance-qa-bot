@@ -1,7 +1,7 @@
 from sentence_transformers import CrossEncoder
 
 RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-TOP_N = 3
+TOP_N = 7
 
 def load_reranker():
     reranker = CrossEncoder(RERANKER_MODEL)

@@ -16,6 +16,7 @@ def get_vectorstore(embedder):
         collection_name=COLLECTION_NAME,
         connection=CONNECTION_STRING,
         use_jsonb=True,
+        pre_delete_collection=True
     )
     return vectorstore
 

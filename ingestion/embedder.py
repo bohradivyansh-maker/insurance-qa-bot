@@ -1,11 +1,11 @@
 from langchain_huggingface import HuggingFaceEmbeddings
 
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
 
 def load_embedder():
     embedder = HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL,
-        model_kwargs={"device": "cpu"},
+        model_kwargs={"device": "cuda"},
         encode_kwargs={"normalize_embeddings": True}
     )
     print(f"Embedding model loaded: {EMBEDDING_MODEL}")

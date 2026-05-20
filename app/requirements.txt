@@ -10,3 +10,4 @@ langfuse
 psycopg[binary]
 python-dotenv
 langchain-text-splitters
+rank_bm25
