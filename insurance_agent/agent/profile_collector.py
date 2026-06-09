@@ -79,8 +79,12 @@ GOAL_MAP = {
 
 def parse_goal(text: str):
     text = text.strip().lower()
-    # Check longer/more specific phrases first to avoid partial matches
-    ordered_keys = sorted(GOAL_MAP.keys(), key=len, reverse=True)
+    # Single digits only match if the ENTIRE input is that digit
+    # prevents "22" matching "2" → lump_sum
+    if text in ("1", "2", "3", "4", "5"):
+        return GOAL_MAP[text]
+    # All other keys — substring match, longest first, skip single digits
+    ordered_keys = [k for k in sorted(GOAL_MAP.keys(), key=len, reverse=True) if len(k) > 1]
     for key in ordered_keys:
         if key in text:
             return GOAL_MAP[key]
@@ -104,14 +108,9 @@ def detect_mode(specific_plans: list) -> str:
     return "comparison" if specific_plans else "suggestion"
 
 def extract_fields_from_text(text: str) -> dict:
-    """
-    Tries to extract any profile fields present in free-form text.
-    Returns dict of successfully extracted fields — may be partial or empty.
-    """
     extracted = {}
     text_lower = text.lower()
 
-    # Age — matches: "29 years old", "age 29", "i am 29", "29yo", bare numbers if short
     age_patterns = [
         r'\bage\s*(?:is\s*|of\s*)?(\d{1,3})',
         r'(\d{1,3})\s*(?:years?\s*old|yr\s*old|yo\b)',
@@ -128,7 +127,6 @@ def extract_fields_from_text(text: str) -> dict:
                 extracted["age"] = int(val)
                 break
 
-    # Annual income — matches: "earning 12 lakh", "income 8L", "salary 6,00,000", "12LPA", "12 lakh annually"
     income_patterns = [
         r'earn(?:ing)?\s*([\d,.]+\s*(?:lakh|l|cr|crore|k)?)',
         r'annual\s*income\s*(?:is\s*|of\s*)?([\d,.]+\s*(?:lakh|l|cr|crore|k)?)',
@@ -145,7 +143,6 @@ def extract_fields_from_text(text: str) -> dict:
                 extracted["annual_income"] = int(val)
                 break
 
-    # Dependents — matches: "1 dependent", "2 dependants", "no dependents", "0 dependants"
     dep_patterns = [
         r'(\d+)\s*depend(?:e|a)n',
         r'no\s*depend(?:e|a)n',
@@ -162,7 +159,6 @@ def extract_fields_from_text(text: str) -> dict:
                     extracted["dependents"] = val
             break
 
-    # Monthly spending — matches: "monthly expenses 45000", "spend 45k", "expenses of 45,000"
     spend_patterns = [
         r'monthly\s*(?:expenses?|spending|expenditure)\s*(?:of\s*)?(?:₹\s*)?([\d,.]+\s*(?:lakh|l|k)?)',
         r'(?:expenses?|spending|expenditure)\s*(?:of\s*)?(?:₹\s*)?([\d,.]+\s*(?:lakh|l|k)?)',
@@ -177,7 +173,6 @@ def extract_fields_from_text(text: str) -> dict:
                 extracted["monthly_spending"] = int(val)
                 break
 
-    # Goal
     goal = parse_goal(text)
     if goal:
         extracted["goal"] = goal
@@ -186,39 +181,26 @@ def extract_fields_from_text(text: str) -> dict:
 
 
 def _validate_field(field: str, value, collected: dict):
-    """
-    Validates a single field value. Returns (is_valid, error_message).
-    """
     if field == "age":
-        if value < 0:
-            return False, ERRORS["age_negative"]
-        if value < MIN_AGE:
-            return False, ERRORS["age_too_low"]
-        if value > MAX_AGE:
-            return False, ERRORS["age_too_high"].format(int(value))
+        if value < 0: return False, ERRORS["age_negative"]
+        if value < MIN_AGE: return False, ERRORS["age_too_low"]
+        if value > MAX_AGE: return False, ERRORS["age_too_high"].format(int(value))
         return True, None
 
     if field == "annual_income":
-        if value < 0:
-            return False, ERRORS["income_negative"]
-        if value < MIN_INCOME:
-            return False, ERRORS["income_too_low"].format(f"{int(value):,}")
-        if value > MAX_INCOME:
-            return False, ERRORS["income_too_high"].format(f"{int(value):,}")
+        if value < 0: return False, ERRORS["income_negative"]
+        if value < MIN_INCOME: return False, ERRORS["income_too_low"].format(f"{int(value):,}")
+        if value > MAX_INCOME: return False, ERRORS["income_too_high"].format(f"{int(value):,}")
         return True, None
 
     if field == "dependents":
-        if value < 0:
-            return False, ERRORS["dependents_negative"]
-        if value > MAX_DEP:
-            return False, ERRORS["dependents_too_high"].format(value)
+        if value < 0: return False, ERRORS["dependents_negative"]
+        if value > MAX_DEP: return False, ERRORS["dependents_too_high"].format(value)
         return True, None
 
     if field == "monthly_spending":
-        if value < 0:
-            return False, ERRORS["spending_negative"]
-        if value == 0:
-            return False, ERRORS["spending_zero"]
+        if value < 0: return False, ERRORS["spending_negative"]
+        if value == 0: return False, ERRORS["spending_zero"]
         if "annual_income" in collected:
             monthly_income = collected["annual_income"] / 12
             if value >= monthly_income * 0.95:
@@ -234,13 +216,6 @@ def _validate_field(field: str, value, collected: dict):
 
 
 class ProfileCollector:
-    """
-    Smart profile collector.
-    - If user provides full profile in one message → skip all questions
-    - If user provides partial profile → confirm what was extracted, ask only for missing fields
-    - If user provides nothing parseable → ask field by field as before
-    """
-
     def __init__(self):
         self.current_field_index = 0
         self.collected = {
@@ -268,11 +243,7 @@ class ProfileCollector:
     def _missing_fields(self) -> list:
         return [f for f in FIELDS if f not in self.collected]
 
-    def _is_complete(self) -> bool:
-        return len(self._missing_fields()) == 0
-
     def _format_extracted_summary(self, extracted: dict) -> str:
-        """Formats what was extracted for confirmation message."""
         goal_display = {
             "pension": "Regular pension / income after retirement",
             "lump_sum": "Lump sum savings at maturity",
@@ -281,35 +252,27 @@ class ProfileCollector:
             "child_planning": "Child education and future planning",
         }
         lines = []
-        if "age" in extracted:
-            lines.append(f"- Age: {extracted['age']} years")
-        if "annual_income" in extracted:
-            lines.append(f"- Annual income: ₹{extracted['annual_income']:,}")
-        if "dependents" in extracted:
-            lines.append(f"- Dependents: {extracted['dependents']}")
-        if "monthly_spending" in extracted:
-            lines.append(f"- Monthly expenses: ₹{extracted['monthly_spending']:,}")
-        if "goal" in extracted:
-            lines.append(f"- Goal: {goal_display.get(extracted['goal'], extracted['goal'])}")
+        if "age" in extracted: lines.append(f"- Age: {extracted['age']} years")
+        if "annual_income" in extracted: lines.append(f"- Annual income: ₹{extracted['annual_income']:,}")
+        if "dependents" in extracted: lines.append(f"- Dependents: {extracted['dependents']}")
+        if "monthly_spending" in extracted: lines.append(f"- Monthly expenses: ₹{extracted['monthly_spending']:,}")
+        if "goal" in extracted: lines.append(f"- Goal: {goal_display.get(extracted['goal'], extracted['goal'])}")
         return "\n".join(lines)
 
-    def handle(self, user_message: str):
+    def handle(self, user_message: str) -> tuple[str, dict, bool]:
         """
-        Process one user message.
-        Returns (response_text, profile_dict_or_None)
+        Returns (response_text, partial_or_full_profile_dict, is_complete_boolean)
         """
         if self.done:
-            return "Your profile is already complete!", self.collected
+            return "Your profile is already complete!", self.collected, True
 
         self._update_plan_detection(user_message)
 
-        # ── First message — try to extract everything upfront ─────────────
         if not self.initial_extraction_done:
             self.initial_extraction_done = True
             extracted = extract_fields_from_text(user_message)
 
             if extracted:
-                # Validate and store what was extracted
                 valid_extracted = {}
                 validation_errors = []
                 for field, value in extracted.items():
@@ -322,68 +285,52 @@ class ProfileCollector:
 
                 missing = self._missing_fields()
 
-                # All fields extracted and valid
                 if not missing:
                     self.done = True
                     summary = self._format_extracted_summary(valid_extracted)
                     return (
-                        f"Got it! Here's what I picked up from your message:\n\n"
-                        f"{summary}\n\n"
-                        f"Starting analysis... 🎯"
-                    ), self.collected
+                        f"Got it! Here's what I picked up:\n\n{summary}\n\nStarting analysis... 🎯"
+                    ), self.collected, True
 
-                # Partial extraction — confirm what was found, ask for missing
                 summary = self._format_extracted_summary(valid_extracted)
                 next_field = missing[0]
                 next_q = QUESTIONS[next_field]
 
-                confirmation = f"Here's what I gathered from your message:\n\n{summary}\n\n"
+                confirmation = f"Here's what I gathered:\n\n{summary}\n\n"
                 if validation_errors:
                     confirmation += f"⚠️ Some values needed correction: {'; '.join(validation_errors)}\n\n"
-                confirmation += f"Just need a few more details.\n\n**{next_q}**"
+                confirmation += f"**{next_q}**"
 
-                return confirmation, None
+                return confirmation, self.collected, False
 
-            # Nothing extracted — start normal field-by-field collection
             return (
                 f"I'll ask you a few quick questions to find the best plan for you.\n\n"
                 f"**{QUESTIONS[FIELDS[0]]}**"
-            ), None
+            ), self.collected, False
 
-        # ── Subsequent messages — fill missing fields one by one ───────────
         field = self.current_field
 
         if field is None:
             self.done = True
-            return "Perfect! I have everything I need. 🎯", self.collected
+            return "Perfect! I have everything I need. 🎯", self.collected, True
 
-        if field == "age":
-            num = parse_number(user_message)
-            if num is None:
-                return ERRORS["age_invalid"], None
-            is_valid, error = _validate_field("age", num, self.collected)
-            if not is_valid:
-                return error, None
-            self.collected["age"] = int(num)
-            missing = self._missing_fields()
-            if not missing:
-                self.done = True
-                return "Perfect! I have everything I need. 🎯", self.collected
-            return f"Got it — age {int(num)}! 👍\n\n**{QUESTIONS[missing[0]]}**", None
+        parse_logic = {
+            "age": (parse_number, ERRORS["age_invalid"]),
+            "annual_income": (parse_number, ERRORS["income_invalid"]),
+            "monthly_spending": (parse_number, ERRORS["spending_invalid"]),
+        }
 
-        elif field == "annual_income":
-            num = parse_number(user_message)
+        if field in parse_logic:
+            parser, error_msg = parse_logic[field]
+            num = parser(user_message)
             if num is None:
-                return ERRORS["income_invalid"], None
-            is_valid, error = _validate_field("annual_income", num, self.collected)
+                return error_msg, self.collected, False
+            
+            is_valid, error = _validate_field(field, num, self.collected)
             if not is_valid:
-                return error, None
-            self.collected["annual_income"] = int(num)
-            missing = self._missing_fields()
-            if not missing:
-                self.done = True
-                return "Perfect! I have everything I need. 🎯", self.collected
-            return f"Annual income ₹{int(num):,} noted! 💰\n\n**{QUESTIONS[missing[0]]}**", None
+                return error, self.collected, False
+                
+            self.collected[field] = int(num)
 
         elif field == "dependents":
             all_nums = [float(x) for x in re.findall(r'\d+', user_message.replace(",", ""))]
@@ -391,38 +338,31 @@ class ProfileCollector:
                 if any(w in user_message.lower() for w in ["no ", "zero", "none", "nobody"]):
                     all_nums = [0]
                 else:
-                    return ERRORS["dependents_invalid"], None
+                    return ERRORS["dependents_invalid"], self.collected, False
+                    
             total = int(sum(all_nums)) if len(all_nums) > 1 else int(all_nums[0])
             is_valid, error = _validate_field("dependents", total, self.collected)
             if not is_valid:
-                return error, None
+                return error, self.collected, False
             self.collected["dependents"] = total
-            missing = self._missing_fields()
-            if not missing:
-                self.done = True
-                return "Perfect! I have everything I need. 🎯", self.collected
-            return f"{total} dependent(s) noted! 👨‍👩‍👧\n\n**{QUESTIONS[missing[0]]}**", None
-
-        elif field == "monthly_spending":
-            num = parse_number(user_message)
-            if num is None:
-                return ERRORS["spending_invalid"], None
-            is_valid, error = _validate_field("monthly_spending", num, self.collected)
-            if not is_valid:
-                return error, None
-            self.collected["monthly_spending"] = int(num)
-            missing = self._missing_fields()
-            if not missing:
-                self.done = True
-                return "Perfect! I have everything I need. 🎯", self.collected
-            return f"Monthly spending ₹{int(num):,} noted! 🏠\n\n**{QUESTIONS[missing[0]]}**", None
 
         elif field == "goal":
             goal = parse_goal(user_message)
             if goal is None:
-                return ERRORS["goal_invalid"], None
+                return ERRORS["goal_invalid"], self.collected, False
             self.collected["goal"] = goal
-            self.done = True
-            return "Perfect! I have everything I need. 🎯", self.collected
 
-        return "Something went wrong. Please restart the chat.", None
+        missing = self._missing_fields()
+        if not missing:
+            self.done = True
+            return "Perfect! I have everything I need. 🎯", self.collected, True
+            
+        success_msgs = {
+            "age": f"Got it — age {self.collected.get('age')}! 👍",
+            "annual_income": f"Annual income ₹{self.collected.get('annual_income', 0):,} noted! 💰",
+            "dependents": f"{self.collected.get('dependents')} dependent(s) noted! 👨‍👩‍👧",
+            "monthly_spending": f"Monthly spending ₹{self.collected.get('monthly_spending', 0):,} noted! 🏠",
+        }
+        
+        prefix = success_msgs.get(field, "Got it!")
+        return f"{prefix}\n\n**{QUESTIONS[missing[0]]}**", self.collected, False

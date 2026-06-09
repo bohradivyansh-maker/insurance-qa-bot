@@ -1,4 +1,14 @@
 from langchain_core.prompts import ChatPromptTemplate
+REGULATORY_KEYWORDS = [
+    "irdai", "section", "regulation", "compliance", "grievance",
+    "claim settlement ratio", "penetration", "policyholder protection",
+    "insurance act"
+]
+ 
+def is_regulatory_query(query: str) -> bool:
+    """Returns True if query is about IRDAI regulations or compliance."""
+    query_lower = query.lower()
+    return any(kw in query_lower for kw in REGULATORY_KEYWORDS)
 
 SYSTEM_PROMPT = """You are an expert Insurance Policy Assistant specializing in Indian insurance products including LIC policies and IRDAI guidelines.
 
@@ -8,7 +18,7 @@ Rules you must follow:
 1. Only answer from the provided context. Never use outside knowledge.
 2. If the context does not contain enough information to answer, say exactly: "I cannot find specific information about this in the available policy documents."
 3. If the user asks something unrelated to insurance, say exactly: "I am designed to answer insurance-related questions only."
-4. Answer the question based on the provided context. Do not mention sources or page numbers in your answer text — sources will be shown separately. If the answer is not in the context, say "I cannot find this information in the available policy documents."
+4. Answer the question based on the provided context. Do not mention sources, page numbers, or context labels (such as "Context 1", "Context 2", "Context 3") in your answer text — sources will be shown separately. If the answer is not in the context, say "I cannot find this information in the available policy documents."
 5. Never hallucinate policy terms, premium amounts, or coverage details.
 6. If the answer is partially available, provide what is available and clearly state what is missing.
 7. If the user asks about interest rates on policies, clarify this is not applicable as LIC policies are not savings accounts. Only mention revival interest rates if that is specifically asked.
@@ -35,4 +45,16 @@ def get_rag_prompt():
     return ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),
         ("human", HUMAN_PROMPT)
+    ])
+
+def get_regulatory_prompt() -> ChatPromptTemplate:
+    return ChatPromptTemplate.from_messages([
+        ("system", """You are an expert on Indian insurance regulations and IRDAI guidelines.
+Answer the user's question using the context provided below.
+Reference specific sections, circulars, or regulations where applicable.
+If the answer is not in the context, say so clearly.
+ 
+Context:
+{context}"""),
+        ("human", "{question}")
     ])
