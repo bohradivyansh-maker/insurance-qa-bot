@@ -1,5 +1,0 @@
-1. Start postgres container-pgvector:docker start pgvector
-                            net stop postgresql-x64-16
-2. Run app/- chainlit run main.py 
-3. Start redis cache- docker start redis-cache
-4. Redis part now- docker exec -it redis-cache redis-cli
